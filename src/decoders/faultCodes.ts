@@ -56,11 +56,10 @@ export type FaultCodeName = (typeof FAULT_BITS)[number][2];
  * Some firmware builds never set some of these codes; the number identifies the
  * flag, not whether a given ECU can raise it.
  *
- * The numbers follow bit position, but the names follow the C field names,
- * and the C header comments for `misfireOddBank`, `misfireEvenBank` and
- * `airflowMeter` are shifted by one relative to those names. Until that is
- * confirmed against the ECU's documented fault code table, treat the pairing
- * of those three names with their numbers as unverified.
+ * The numbers follow bit position in the firmware's priority table and match
+ * the published Land Rover fault code lists. Those lists name cylinder banks
+ * A and B rather than odd and even, so which bank is "odd" follows the C field
+ * names.
  */
 export const FAULT_CODE_NUMBERS: Readonly<Record<FaultCodeName, number>> =
   Object.freeze(
