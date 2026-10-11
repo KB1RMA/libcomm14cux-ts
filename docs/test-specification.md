@@ -11,7 +11,7 @@ Section numbers (§) are referenced from the header comment of each test file.
 - **Public API only.** Tests import from `src/index.ts`, never from internal modules (`protocol/`, `decoders/`, `queue.ts`, `bytes.ts`), and act as a user would: through `Ecu`, `SimulatedTransport` and `WebSerialTransport`. Decoder boundary values are tested through the matching `Ecu` getter by planting bytes in the simulated memory. Shared helpers live in `src/test-support/`. If a branch cannot be reached through the public API, delete it instead of testing it directly.
 - **Wire-level assertions** use `SimulatedTransport`'s write log, so tests can assert the exact bytes sent.
 - **Surface mapping.** `c14cux_foo(info, &out)` becomes `ecu.foo(): Promise<Out>`; a `false` return becomes a rejected promise (`TimeoutError`, `ProtocolError`, `InvalidReadingError`, `ReadCancelledError`, `NotConnectedError`). The `c14cux_` prefix is dropped and names are camelCase; `c14cux_init`/`cleanup` are the constructor and `disconnect`. `connect` takes no device path or baud rate, because those belong to the `Transport` (`WebSerialTransport` is given the `SerialPort` and optional baud).
-- **Divergences from the C library** are deliberate, minimal, and each has a test marked "deliberate divergence". They exist only where C leaves behaviour undefined (division by zero, `NaN` from `sqrt`, a function with no return statement), where C reads the wrong data (the coarse-address cache, §2.3), or to avoid stale state: the ROM revision and voltage coefficients are forgotten on `disconnect`, so reconnecting to a different ECU is safe. v1 adds nothing to the C library's feature set.
+- **Divergences from the C library** are deliberate, minimal, and each has a test marked "deliberate divergence". They exist only where C leaves behaviour undefined (division by zero, `NaN` from `sqrt`, a function with no return statement), where C reads the wrong data (the coarse-address cache, §2.3), where C treats a fault bit the firmware sets as spare (fault code 25, §5.12), or to avoid stale state: the ROM revision and voltage coefficients are forgotten on `disconnect`, so reconnecting to a different ECU is safe. v1 adds nothing else to the C library's feature set.
 - Addresses and constants are taken from `comm14cux.h`. All multi-byte ECU values are big-endian.
 
 ## Capability map
@@ -148,7 +148,7 @@ Row scaler for maps 1–5 is at map offset + `0x10A`. The RPM table is sixteen 2
 
 | Address | Faults (LSB first; `-` is spare) |
 |---|---|
-| `0x0049` | ROM checksum, lambda odd, lambda even, -, misfire odd, misfire even, airflow meter, tune resistor |
+| `0x0049` | ROM checksum, lambda odd, lambda even, general misfire, misfire odd, misfire even, airflow meter, tune resistor |
 | `0x004A` | injector odd, -, injector even, coolant temp, throttle pot, pot hi / MAF lo, pot lo / MAF hi, purge leak |
 | `0x004B` | -, mixture too lean, -, intake air leak, - (4 spare) |
 | `0x004C` | low fuel pressure, - (3 spare), idle stepper, -, road speed, neutral switch |
@@ -156,6 +156,8 @@ Row scaler for maps 1–5 is at map offset + `0x10A`. The RPM table is sixteen 2
 | `0x004E` | - (6 spare), battery disconnected, RAM checksum |
 
 Each flag also has a factory fault code number (`FAULT_CODE_NUMBERS`), taken from the `.faultCodes` table in `faults.asm` of the 14CUX firmware disassembly. That table lists each byte's eight bits LSB first, in priority order, as BCD. Notably `0x004D` bit 4 is code 59, not 58. Tests pin every number as a literal and check the map has the same names as `getFaultCodes`.
+
+**Deliberate divergence:** bit 3 of `0x0049` is fault code 25 (general misfire), reported as `misfireGeneral`. libcomm14cux treats it as spare. The [firmware disassembly](https://github.com/colinbourassa/14cux-firmware) sets it with `oraa #$08` in the misfire handler (`ignitionInt.asm`), and the priority table in `faults.asm` lists `0x49` as `29 44 45 25 40 50 12 21`, putting code 25 at bit 3. The same code is wrapped in `IF BUILD_R3360_AND_LATER` with the note that newer code does not use fault code 25, so only firmware before R3360 is expected to set it.
 
 **Open question:** in `comm14cux.h` the field comments for `Misfire_Odd_Bank`, `Misfire_Even_Bank` and `Airflow_Meter` are shifted by one relative to their names. The TypeScript keys follow the C *field names* (`misfireOddBank`, …), so they match upstream, but the comments suggest the names may be mislabelled. Confirm against the ECU's documented fault code table before v1.
 

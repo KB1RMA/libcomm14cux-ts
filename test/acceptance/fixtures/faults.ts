@@ -38,13 +38,24 @@ export const oddBankTrouble: FaultFixture = {
   set: ['lambdaSensorOdd', 'misfireOddBank'],
 };
 
+/**
+ * A misfire on the odd bank as firmware before R3360 stores it: general
+ * misfire (code 25) alongside the bank code. The synthetic ROMs model data
+ * layout only, not firmware version, so any ROM fixture will do.
+ */
+export const earlyFirmwareMisfire: FaultFixture = {
+  name: 'early firmware misfire',
+  bytes: [0x18, 0, 0, 0, 0, 0],
+  set: ['misfireGeneral', 'misfireOddBank'],
+};
+
 /** Several faults across every byte of the block, including the spare bits. */
 export const workshopFull: FaultFixture = {
   name: 'one fault in every byte, spare bits set',
-  // Spare bits (0x49 bit 3, 0x4A bit 1, 0x4B bits 0/2/4–7, 0x4C bits 1–3/5,
+  // Spare bits (0x4A bit 1, 0x4B bits 0/2/4–7, 0x4C bits 1–3/5,
   // 0x4D bits 0–3/6–7, 0x4E bits 0–5) are set too and must be ignored.
   bytes: [
-    0x08 | 0x80,
+    0x80,
     0x02 | 0x08,
     0xf5 | 0x08,
     0x2e | 0x40,
@@ -66,5 +77,6 @@ export const allFaultFixtures: readonly FaultFixture[] = [
   noFaults,
   batteryDisconnected,
   oddBankTrouble,
+  earlyFirmwareMisfire,
   workshopFull,
 ];
