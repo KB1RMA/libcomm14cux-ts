@@ -19,6 +19,8 @@ const WRITE_LENGTH_CODE = 0;
 // 512-byte read reply, plus a few echoes.
 const MAX_LATE_BYTES = 0x200 + 4;
 
+type Writable<T> = { -readonly [K in keyof T]: T[K] };
+
 /**
  * Memory read and write commands over a `Transport`
  * (`protocol.c`: `c14cux_readMem`, `c14cux_writeMem`).
@@ -263,7 +265,7 @@ export class Protocol {
 
   /**
    * Reads from the transport, and adds the command that was awaiting a reply
-   * to any timeout.
+   * to any timeout. The timeout is rethrown as the same object.
    *
    * @param length - Number of bytes wanted.
    * @param command - The command bytes just sent.
@@ -277,12 +279,13 @@ export class Protocol {
       return await this.#transport.read(length, this.#timeoutMs);
     } catch (error) {
       if (error instanceof TimeoutError) {
-        throw new TimeoutError(error.message, {
-          timeoutMs: error.timeoutMs ?? this.#timeoutMs,
-          requestedBytes: error.requestedBytes ?? length,
-          receivedBytes: error.receivedBytes,
-          command,
-        });
+        // Fill in what the transport left out on the error itself, so its
+        // class, stack and any fields of its own reach the caller unchanged.
+        const details = error as Writable<TimeoutError>;
+
+        details.timeoutMs ??= this.#timeoutMs;
+        details.requestedBytes ??= length;
+        details.command ??= command;
       }
 
       throw error;
