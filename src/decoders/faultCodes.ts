@@ -39,7 +39,7 @@ const FAULT_BITS = [
 
 /**
  * Name of a fault flag in {@link FaultCodes}, taken from the field names of
- * the C `c14cux_faultcodes` struct.
+ * the C `c14cux_faultcodes` struct. `misfireGeneral` has no C field.
  */
 export type FaultCodeName = (typeof FAULT_BITS)[number][2];
 
@@ -47,8 +47,8 @@ export type FaultCodeName = (typeof FAULT_BITS)[number][2];
  * Fault code flags (`c14cux_faultcodes`); `true` means the fault is set.
  *
  * `misfireGeneral` (fault code 25, bit 3 of 0x0049) is not in the C struct.
- * Only firmware before R3360 (early Land Rover and TVR builds) sets it; on
- * later firmware it always reads `false`.
+ * The firmware disassembly shows that only builds before R3360 set it, so it
+ * is not expected to be set on later firmware.
  */
 export type FaultCodes = Record<FaultCodeName, boolean>;
 

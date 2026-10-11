@@ -38,7 +38,11 @@ export const oddBankTrouble: FaultFixture = {
   set: ['lambdaSensorOdd', 'misfireOddBank'],
 };
 
-/** Early (pre-R3360) firmware: a misfire on the odd bank also sets code 25. */
+/**
+ * A misfire on the odd bank as firmware before R3360 stores it: general
+ * misfire (code 25) alongside the bank code. The synthetic ROMs model data
+ * layout only, not firmware version, so any ROM fixture will do.
+ */
 export const earlyFirmwareMisfire: FaultFixture = {
   name: 'early firmware misfire',
   bytes: [0x18, 0, 0, 0, 0, 0],

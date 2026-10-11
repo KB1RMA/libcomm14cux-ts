@@ -86,9 +86,28 @@ describe('Ecu status', () => {
           .map(([n]) => n),
       ).toEqual(['misfireGeneral']);
 
-      transport.memory[0x0049] = 0x00;
+      transport.memory[0x0049] = 0xf7;
 
       expect((await ecu.getFaultCodes()).misfireGeneral).toBe(false);
+    });
+
+    it('decodes all eight bits of 0x0049 as named faults', async () => {
+      const { transport, ecu } = await connected();
+
+      transport.memory[0x0049] = 0xff;
+
+      const codes = await ecu.getFaultCodes();
+
+      expect(
+        Object.entries(codes)
+          .filter(([, set]) => set)
+          .map(([n]) => n)
+          .sort(),
+      ).toEqual(
+        FAULT_BITS.filter(([byte]) => byte === 0)
+          .map(([, , n]) => n)
+          .sort(),
+      );
     });
 
     it('decodes several simultaneous faults', async () => {
