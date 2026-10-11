@@ -4,11 +4,16 @@
 // Ported to TypeScript and modified for comm14cux-ts, 2026.
 
 // [byte offset from 0x0049, bit (0 = LSB), name]. Spare bits are omitted.
-// Names follow the field names of `c14cux_faultcodes`.
+// Names follow the field names of `c14cux_faultcodes`, except `misfireGeneral`,
+// which has no C field.
 const FAULT_BITS = [
   [0, 0, 'romChecksumFailure'],
   [0, 1, 'lambdaSensorOdd'],
   [0, 2, 'lambdaSensorEven'],
+  // Fault code 25. libcomm14cux treats this bit as spare, but the firmware
+  // disassembly (ignitionInt.asm, faults.asm) sets it on a misfire in builds
+  // before R3360. R3360 and later never set it.
+  [0, 3, 'misfireGeneral'],
   [0, 4, 'misfireOddBank'],
   [0, 5, 'misfireEvenBank'],
   [0, 6, 'airflowMeter'],
@@ -34,11 +39,17 @@ const FAULT_BITS = [
 
 /**
  * Name of a fault flag in {@link FaultCodes}, taken from the field names of
- * the C `c14cux_faultcodes` struct.
+ * the C `c14cux_faultcodes` struct. `misfireGeneral` has no C field.
  */
 export type FaultCodeName = (typeof FAULT_BITS)[number][2];
 
-/** Fault code flags (`c14cux_faultcodes`); `true` means the fault is set. */
+/**
+ * Fault code flags (`c14cux_faultcodes`); `true` means the fault is set.
+ *
+ * `misfireGeneral` (fault code 25, bit 3 of 0x0049) is not in the C struct.
+ * The firmware disassembly shows that only builds before R3360 set it, so it
+ * is not expected to be set on later firmware.
+ */
 export type FaultCodes = Record<FaultCodeName, boolean>;
 
 /** Number of bytes in the fault code block at 0x0049. */
