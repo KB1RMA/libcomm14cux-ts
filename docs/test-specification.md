@@ -36,6 +36,7 @@ Section numbers (§) are referenced from the header comment of each test file.
 | `c14cux_getFuelMap`, `getCurrentFuelMap`, `getFuelMapRowIndex`, `getFuelMapColumnIndex`, `getRpmTable` | 5.10 | `src/ecu.romData.test.ts` |
 | `c14cux_getLambdaTrimShort/Long`, `c14cux_getCOTrimVoltage` | 5.11 | `src/ecu.sensors.test.ts` |
 | `c14cux_getFaultCodes`, `c14cux_clearFaultCodes` | 5.12 | `src/ecu.status.test.ts` |
+| `FAULT_CODE_NUMBERS` (no C equivalent) | 5.12 | `src/ecu.status.test.ts` |
 | `getFuelPumpRelayState`, `isMILOn`, `getIdleMode`, `getScreenHeaterState`, `getACCompressorState`, `getPurgeValveState` | 5.13 | `src/ecu.status.test.ts` |
 | `c14cux_getTuneRevision` | 5.14 | `src/ecu.status.test.ts` |
 | `c14cux_getInjectorPulseWidth` | 5.15 | `src/ecu.sensors.test.ts` |
@@ -153,6 +154,8 @@ Row scaler for maps 1–5 is at map offset + `0x10A`. The RPM table is sixteen 2
 | `0x004C` | low fuel pressure, - (3 spare), idle stepper, -, road speed, neutral switch |
 | `0x004D` | - (4 spare), low pressure or air leak, fuel temp, - (2 spare) |
 | `0x004E` | - (6 spare), battery disconnected, RAM checksum |
+
+Each flag also has a factory fault code number (`FAULT_CODE_NUMBERS`), taken from the `.faultCodes` table in `faults.asm` of the 14CUX firmware disassembly. That table lists each byte's eight bits LSB first, in priority order, as BCD. Notably `0x004D` bit 4 is code 59, not 58. Tests pin every number as a literal and check the map has the same names as `getFaultCodes`.
 
 **Open question:** in `comm14cux.h` the field comments for `Misfire_Odd_Bank`, `Misfire_Even_Bank` and `Airflow_Meter` are shifted by one relative to their names. The TypeScript keys follow the C *field names* (`misfireOddBank`, …), so they match upstream, but the comments suggest the names may be mislabelled. Confirm against the ECU's documented fault code table before v1.
 
