@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0](https://github.com/KB1RMA/libcomm14cux-ts/compare/v0.1.0...v0.2.0) (2026-10-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* decode fault code 25 (general misfire) from bit 3 of 0x0049 ([#21](https://github.com/KB1RMA/libcomm14cux-ts/issues/21))
+
+### Features
+
+* decode fault code 25 (general misfire) from bit 3 of 0x0049 ([#21](https://github.com/KB1RMA/libcomm14cux-ts/issues/21)) ([8d6700c](https://github.com/KB1RMA/libcomm14cux-ts/commit/8d6700cc35b071d64cd87a83e4be2b2a05facbc3))
+* expose factory fault code numbers (FAULT_CODE_NUMBERS) ([#23](https://github.com/KB1RMA/libcomm14cux-ts/issues/23)) ([a553a37](https://github.com/KB1RMA/libcomm14cux-ts/commit/a553a3755b5ffca4ae2702fc2e4e366e35ab2468))
+
 ## 0.1.0 (2026-10-06)
 
 
