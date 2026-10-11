@@ -140,6 +140,8 @@ Writing to ECU memory, running the fuel pump or driving the idle air control mot
 
 The protocol and decoding logic are derived from [libcomm14cux](https://github.com/colinbourassa/libcomm14cux) © Colin Bourassa, licensed under the GNU GPL v3.
 
+The factory fault code numbers and the general misfire flag (fault code 25) come from Colin Bourassa's [14cux-firmware](https://github.com/colinbourassa/14cux-firmware) disassembly, used with his agreement.
+
 This project is therefore licensed under the **GNU General Public License v3.0 only** (`GPL-3.0-only`). Any application that includes this library must also be distributed under GPL-3.0-compatible terms, with its source code available.
 
 Parts of this project were written with the help of an AI assistant. The original libcomm14cux and RoverGauge projects do not accept AI-generated contributions, so nothing from this repository will be submitted to them.
