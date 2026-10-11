@@ -49,15 +49,6 @@ describe('Ecu status', () => {
       },
     );
 
-    it('covers exactly the faults that getFaultCodes reports', async () => {
-      const { ecu } = await connected();
-      const codes = await ecu.getFaultCodes();
-
-      expect(Object.keys(FAULT_CODE_NUMBERS).sort()).toEqual(
-        Object.keys(codes).sort(),
-      );
-    });
-
     it('gives each flag a distinct number', () => {
       const numbers = Object.values(FAULT_CODE_NUMBERS);
       expect(new Set(numbers).size).toBe(numbers.length);

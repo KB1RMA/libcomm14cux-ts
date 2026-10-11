@@ -7,7 +7,8 @@
 // Spare bits are omitted.
 // Names follow the field names of `c14cux_faultcodes`, except `misfireGeneral`,
 // which has no C field. Code numbers are the bytes of the `.faultCodes` table
-// in faults.asm of the 14CUX firmware disassembly: each byte of the fault
+// in faults.asm of the 14CUX firmware disassembly
+// (https://github.com/colinbourassa/14cux-firmware): each byte of the fault
 // block lists its eight bits there in priority order, LSB first, as BCD (so
 // $59 is code 59).
 const FAULT_BITS = [
@@ -54,6 +55,12 @@ export type FaultCodeName = (typeof FAULT_BITS)[number][2];
  *
  * Some firmware builds never set some of these codes; the number identifies the
  * flag, not whether a given ECU can raise it.
+ *
+ * The numbers follow bit position, but the names follow the C field names,
+ * and the C header comments for `misfireOddBank`, `misfireEvenBank` and
+ * `airflowMeter` are shifted by one relative to those names. Until that is
+ * confirmed against the ECU's documented fault code table, treat the pairing
+ * of those three names with their numbers as unverified.
  */
 export const FAULT_CODE_NUMBERS: Readonly<Record<FaultCodeName, number>> =
   Object.freeze(
