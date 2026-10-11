@@ -36,6 +36,7 @@ Section numbers (§) are referenced from the header comment of each test file.
 | `c14cux_getFuelMap`, `getCurrentFuelMap`, `getFuelMapRowIndex`, `getFuelMapColumnIndex`, `getRpmTable` | 5.10 | `src/ecu.romData.test.ts` |
 | `c14cux_getLambdaTrimShort/Long`, `c14cux_getCOTrimVoltage` | 5.11 | `src/ecu.sensors.test.ts` |
 | `c14cux_getFaultCodes`, `c14cux_clearFaultCodes` | 5.12 | `src/ecu.status.test.ts` |
+| `FAULT_CODE_NUMBERS` (no C equivalent) | 5.12 | `src/ecu.status.test.ts` |
 | `getFuelPumpRelayState`, `isMILOn`, `getIdleMode`, `getScreenHeaterState`, `getACCompressorState`, `getPurgeValveState` | 5.13 | `src/ecu.status.test.ts` |
 | `c14cux_getTuneRevision` | 5.14 | `src/ecu.status.test.ts` |
 | `c14cux_getInjectorPulseWidth` | 5.15 | `src/ecu.sensors.test.ts` |
@@ -154,9 +155,11 @@ Row scaler for maps 1–5 is at map offset + `0x10A`. The RPM table is sixteen 2
 | `0x004D` | - (4 spare), low pressure or air leak, fuel temp, - (2 spare) |
 | `0x004E` | - (6 spare), battery disconnected, RAM checksum |
 
+Each flag also has a factory fault code number (`FAULT_CODE_NUMBERS`), taken from the `.faultCodes` table in `faults.asm` of the 14CUX firmware disassembly. That table lists each byte's eight bits LSB first, in priority order, as BCD. Notably `0x004D` bit 4 is code 59, not 58. Tests pin every number as a literal and check that no two flags share a number; the `Record<FaultCodeName, number>` type keeps the map in step with `getFaultCodes`.
+
 **Deliberate divergence:** bit 3 of `0x0049` is fault code 25 (general misfire), reported as `misfireGeneral`. libcomm14cux treats it as spare. The [firmware disassembly](https://github.com/colinbourassa/14cux-firmware) sets it with `oraa #$08` in the misfire handler (`ignitionInt.asm`), and the priority table in `faults.asm` lists `0x49` as `29 44 45 25 40 50 12 21`, putting code 25 at bit 3. The same code is wrapped in `IF BUILD_R3360_AND_LATER` with the note that newer code does not use fault code 25, so only firmware before R3360 is expected to set it.
 
-**Open question:** in `comm14cux.h` the field comments for `Misfire_Odd_Bank`, `Misfire_Even_Bank` and `Airflow_Meter` are shifted by one relative to their names. The TypeScript keys follow the C *field names* (`misfireOddBank`, …), so they match upstream, but the comments suggest the names may be mislabelled. Confirm against the ECU's documented fault code table before v1.
+**Resolved: the three names that looked shifted.** In `comm14cux.h` the field comments for `Misfire_Odd_Bank`, `Misfire_Even_Bank` and `Airflow_Meter` are shifted by one relative to their names. The likely cause is bit 3 of `0x0049`, which libcomm14cux treats as spare and which is fault code 25 (see the divergence above): counting from the first non-spare bit puts every later comment one position early. The firmware table agrees with the TypeScript names, since `0x49` lists code 40 at bit 4, 50 at bit 5 and 12 at bit 6, and published Land Rover tables give the same meanings: 12 is the air flow meter, 40 is misfire on bank A and 50 is misfire on bank B ([Morgan/Rover fault codes for the Hotwire systems](https://www.gomog.com/allmorgan/HotwireFaultCodes.html), which lists the 14CUX display codes). Those tables name banks A and B, not odd and even, so the odd-to-A and even-to-B assignment follows the C field names and is not independently confirmed.
 
 ## 6. Ecu
 

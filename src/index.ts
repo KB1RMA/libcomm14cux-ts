@@ -10,6 +10,7 @@ export {
   WebSerialTransport,
   type WebSerialTransportOptions,
 } from './transport/webSerial.js';
+export { FAULT_CODE_NUMBERS } from './decoders/faultCodes.js';
 export type { FaultCodes, FaultCodeName } from './decoders/faultCodes.js';
 export type { FuelMapIndex } from './decoders/fuelMap.js';
 export type { TuneRevision } from './decoders/tuneRevision.js';

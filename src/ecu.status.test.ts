@@ -5,38 +5,56 @@
 
 // Spec: docs/test-specification.md §5.12 (fault codes), §5.13 (flags),
 // §5.14 (tune revision)
-import { type FaultCodeName, PurgeValveState } from './index.js';
+import {
+  FAULT_CODE_NUMBERS,
+  type FaultCodeName,
+  PurgeValveState,
+} from './index.js';
 import { connected } from './test-support/ecu.js';
 
-const FAULT_BITS: [number, number, FaultCodeName][] = [
-  [0, 0, 'romChecksumFailure'],
-  [0, 1, 'lambdaSensorOdd'],
-  [0, 2, 'lambdaSensorEven'],
-  [0, 3, 'misfireGeneral'],
-  [0, 4, 'misfireOddBank'],
-  [0, 5, 'misfireEvenBank'],
-  [0, 6, 'airflowMeter'],
-  [0, 7, 'tuneResistorOutOfRange'],
-  [1, 0, 'injectorOddBank'],
-  [1, 2, 'injectorEvenBank'],
-  [1, 3, 'coolantTempSensor'],
-  [1, 4, 'throttlePot'],
-  [1, 5, 'throttlePotHiMafLo'],
-  [1, 6, 'throttlePotLoMafHi'],
-  [1, 7, 'purgeValveLeak'],
-  [2, 1, 'mixtureTooLean'],
-  [2, 3, 'intakeAirLeak'],
-  [3, 0, 'lowFuelPressure'],
-  [3, 4, 'idleValveStepperMotor'],
-  [3, 6, 'roadSpeedSensor'],
-  [3, 7, 'neutralSwitch'],
-  [4, 4, 'lowFuelPressureOrAirLeak'],
-  [4, 5, 'fuelTempSensor'],
-  [5, 6, 'batteryDisconnected'],
-  [5, 7, 'ramChecksumFailure'],
+const FAULT_BITS: [number, number, FaultCodeName, number][] = [
+  [0, 0, 'romChecksumFailure', 29],
+  [0, 1, 'lambdaSensorOdd', 44],
+  [0, 2, 'lambdaSensorEven', 45],
+  [0, 3, 'misfireGeneral', 25],
+  [0, 4, 'misfireOddBank', 40],
+  [0, 5, 'misfireEvenBank', 50],
+  [0, 6, 'airflowMeter', 12],
+  [0, 7, 'tuneResistorOutOfRange', 21],
+  [1, 0, 'injectorOddBank', 34],
+  [1, 2, 'injectorEvenBank', 36],
+  [1, 3, 'coolantTempSensor', 14],
+  [1, 4, 'throttlePot', 17],
+  [1, 5, 'throttlePotHiMafLo', 18],
+  [1, 6, 'throttlePotLoMafHi', 19],
+  [1, 7, 'purgeValveLeak', 88],
+  [2, 1, 'mixtureTooLean', 26],
+  [2, 3, 'intakeAirLeak', 28],
+  [3, 0, 'lowFuelPressure', 23],
+  [3, 4, 'idleValveStepperMotor', 48],
+  [3, 6, 'roadSpeedSensor', 68],
+  [3, 7, 'neutralSwitch', 69],
+  [4, 4, 'lowFuelPressureOrAirLeak', 59],
+  [4, 5, 'fuelTempSensor', 15],
+  [5, 6, 'batteryDisconnected', 2],
+  [5, 7, 'ramChecksumFailure', 3],
 ];
 
 describe('Ecu status', () => {
+  describe('FAULT_CODE_NUMBERS (§5.12)', () => {
+    it.each(FAULT_BITS)(
+      'gives byte %i bit %i (%s) the factory code %i',
+      (_byte, _bit, name, code) => {
+        expect(FAULT_CODE_NUMBERS[name]).toBe(code);
+      },
+    );
+
+    it('gives each flag a distinct number', () => {
+      const numbers = Object.values(FAULT_CODE_NUMBERS);
+      expect(new Set(numbers).size).toBe(numbers.length);
+    });
+  });
+
   describe('getFaultCodes (§5.12)', () => {
     it('reports exactly the 25 named faults, none set for all-zero memory', async () => {
       const { ecu } = await connected();
