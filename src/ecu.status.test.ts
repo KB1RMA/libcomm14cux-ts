@@ -12,6 +12,7 @@ const FAULT_BITS: [number, number, FaultCodeName][] = [
   [0, 0, 'romChecksumFailure'],
   [0, 1, 'lambdaSensorOdd'],
   [0, 2, 'lambdaSensorEven'],
+  [0, 3, 'misfireGeneral'],
   [0, 4, 'misfireOddBank'],
   [0, 5, 'misfireEvenBank'],
   [0, 6, 'airflowMeter'],
@@ -37,7 +38,7 @@ const FAULT_BITS: [number, number, FaultCodeName][] = [
 
 describe('Ecu status', () => {
   describe('getFaultCodes (§5.12)', () => {
-    it('reports exactly the 24 named faults, none set for all-zero memory', async () => {
+    it('reports exactly the 25 named faults, none set for all-zero memory', async () => {
       const { ecu } = await connected();
       const codes = await ecu.getFaultCodes();
 
@@ -65,10 +66,29 @@ describe('Ecu status', () => {
       const { transport, ecu } = await connected();
 
       transport.memory[0x0048] = 0xff;
-      transport.memory.set([0x08, 0x02, 0xf5, 0x2e, 0xcf, 0x3f], 0x0049);
+      transport.memory.set([0x00, 0x02, 0xf5, 0x2e, 0xcf, 0x3f], 0x0049);
       transport.memory[0x004f] = 0xff;
 
       expect(Object.values(await ecu.getFaultCodes())).not.toContain(true);
+    });
+
+    it('deliberate divergence: reports fault code 25 (general misfire) from bit 3 of 0x0049', async () => {
+      const { transport, ecu } = await connected();
+
+      transport.memory[0x0049] = 0x08;
+
+      const codes = await ecu.getFaultCodes();
+
+      expect(codes.misfireGeneral).toBe(true);
+      expect(
+        Object.entries(codes)
+          .filter(([, set]) => set)
+          .map(([n]) => n),
+      ).toEqual(['misfireGeneral']);
+
+      transport.memory[0x0049] = 0x00;
+
+      expect((await ecu.getFaultCodes()).misfireGeneral).toBe(false);
     });
 
     it('decodes several simultaneous faults', async () => {
