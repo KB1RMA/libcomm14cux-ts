@@ -17,10 +17,12 @@ export type {
 } from './trace.js';
 export type { Transport } from './transport/types.js';
 export { SimulatedTransport } from './transport/simulated.js';
+export type { MemoryWriteFault } from './transport/simulated.js';
 export {
   WebSerialTransport,
   type WebSerialTransportOptions,
 } from './transport/webSerial.js';
+export { FAULT_CODE_NUMBERS } from './decoders/faultCodes.js';
 export type { FaultCodes, FaultCodeName } from './decoders/faultCodes.js';
 export type { FuelMapIndex } from './decoders/fuelMap.js';
 export type { TuneRevision } from './decoders/tuneRevision.js';

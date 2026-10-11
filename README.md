@@ -127,6 +127,8 @@ All ECU access is memory reads and writes:
 - A single read returns 1–16, 80, 100, 400 or 512 bytes. Longer reads are split into chunks.
 - When the next read uses the same length and falls in the same 64-byte block as the last coarse address, the coarse-address step is skipped. libcomm14cux compares a 64-byte window starting at the last (unaligned) address instead, which can read from the wrong block; this library deliberately does not.
 - Any echo mismatch or timeout fails the operation and clears the coarse-address cache.
+- After a failure the ECU may still be waiting for the rest of a command, and would store the next byte it receives if that command was a write. So the next operation first waits until the line has been quiet for `commandResetMs` (an `Ecu` option, default 500 ms), discarding any late bytes, so that the ECU drops the half-received command. libcomm14cux does not do this; this library deliberately does.
+- A write that fails may still have reached the ECU: the value can be stored even though its echo was lost or garbled. Treat a failed write as "may have been written".
 - Long reads (such as a ROM dump) can be stopped with `ecu.cancelRead()`, as in libcomm14cux.
 
 ### CommandQueue
@@ -168,6 +170,8 @@ Writing to ECU memory, running the fuel pump or driving the idle air control mot
 ## Credits and licence
 
 The protocol and decoding logic are derived from [libcomm14cux](https://github.com/colinbourassa/libcomm14cux) © Colin Bourassa, licensed under the GNU GPL v3.
+
+The factory fault code numbers and the general misfire flag (fault code 25) come from Colin Bourassa's [14cux-firmware](https://github.com/colinbourassa/14cux-firmware) disassembly.
 
 This project is therefore licensed under the **GNU General Public License v3.0 only** (`GPL-3.0-only`). Any application that includes this library must also be distributed under GPL-3.0-compatible terms, with its source code available.
 

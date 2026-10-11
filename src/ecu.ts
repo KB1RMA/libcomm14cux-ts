@@ -9,6 +9,7 @@ import {
   Bank,
   DataOffsetRev,
   DataSize,
+  DEFAULT_COMMAND_RESET_MS,
   DEFAULT_READ_TIMEOUT_MS,
   FUEL_MAP_COLUMNS,
   MemoryOffset,
@@ -93,6 +94,15 @@ export interface EcuOptions {
    * quick.
    */
   onTrace?: (event: TraceEvent) => void;
+  /**
+   * After a command fails part-way, the ECU may still be waiting for the rest
+   * of it, and would take the next byte sent as that rest (for a write, as the
+   * value to store). So before the next command, the `Ecu` waits until the
+   * line has been quiet this long, in milliseconds, discarding anything that
+   * arrives late. It should exceed the time the ECU takes to drop a
+   * half-received command. Defaults to 500.
+   */
+  commandResetMs?: number;
 }
 
 /**
@@ -170,6 +180,7 @@ export class Ecu {
     this.#protocol = new Protocol(
       transport,
       options.readTimeoutMs ?? DEFAULT_READ_TIMEOUT_MS,
+      options.commandResetMs ?? DEFAULT_COMMAND_RESET_MS,
       trace &&
         ((event) => {
           this.#emitInOperation(event);
