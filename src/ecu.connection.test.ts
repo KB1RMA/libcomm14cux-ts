@@ -62,13 +62,20 @@ describe('Ecu connection', () => {
     await expect(ecu.getRoadSpeed()).rejects.toThrow(NotConnectedError);
   });
 
-  it('stays connected when the transport cannot close', async () => {
+  it('stays connected when the transport cannot close, and retries on the next disconnect', async () => {
     const { transport, ecu } = await connected();
-
-    vi.spyOn(transport, 'close').mockRejectedValueOnce(new Error('busy'));
+    const close = vi
+      .spyOn(transport, 'close')
+      .mockRejectedValueOnce(new Error('busy'));
 
     await expect(ecu.disconnect()).rejects.toThrow('busy');
     expect(ecu.isConnected()).toBe(true);
+
+    await ecu.disconnect();
+
+    expect(close).toHaveBeenCalledTimes(2);
+    expect(ecu.isConnected()).toBe(false);
+    expect(transport.isOpen).toBe(false);
   });
 
   it('waits for an operation in progress before disconnecting', async () => {
