@@ -15,6 +15,7 @@ import type {
   FuelMap,
   FuelMapIndex,
   Gear,
+  MemoryWriteFault,
   Transport,
   TuneRevision,
   Version,
@@ -34,10 +35,12 @@ describe('public API surface', () => {
       'BAUD_DOUBLE_SPEED',
       'Bank',
       'Comm14cuxError',
+      'DEFAULT_COMMAND_RESET_MS',
       'DEFAULT_READ_TIMEOUT_MS',
       'DataOffsetRev',
       'DataSize',
       'Ecu',
+      'FAULT_CODE_NUMBERS',
       'FUEL_MAP_COLUMNS',
       'FUEL_MAP_ROWS',
       'FUEL_MAP_ROW_SCALER_OFFSET',
@@ -113,6 +116,7 @@ describe('public API surface', () => {
     ]);
     expect(prototypeMethods(api.SimulatedTransport)).toEqual([
       'close',
+      'failMemoryWritesAfter',
       'isOpen',
       'loadRom',
       'open',
@@ -147,6 +151,7 @@ describe('public API surface', () => {
     expect(api.BAUD).toBe(7812);
     expect(api.BAUD_DOUBLE_SPEED).toBe(15625);
     expect(api.DEFAULT_READ_TIMEOUT_MS).toBe(100);
+    expect(api.DEFAULT_COMMAND_RESET_MS).toBe(500);
     expect(api.FUEL_MAP_ROWS).toBe(8);
     expect(api.FUEL_MAP_COLUMNS).toBe(16);
     expect(api.Gear).toEqual({
@@ -175,6 +180,7 @@ describe('public API surface', () => {
       | 'lowFuelPressure'
       | 'lowFuelPressureOrAirLeak'
       | 'misfireEvenBank'
+      | 'misfireGeneral'
       | 'misfireOddBank'
       | 'mixtureTooLean'
       | 'neutralSwitch'
@@ -188,6 +194,9 @@ describe('public API surface', () => {
       | 'tuneResistorOutOfRange'
     >();
     expectTypeOf<FaultCodes>().toEqualTypeOf<Record<FaultCodeName, boolean>>();
+    expectTypeOf<typeof api.FAULT_CODE_NUMBERS>().toEqualTypeOf<
+      Readonly<Record<FaultCodeName, number>>
+    >();
     expectTypeOf<FuelMap>().toEqualTypeOf<{
       data: Uint8Array;
       adjustmentFactor: number;
@@ -207,7 +216,16 @@ describe('public API surface', () => {
       minor: number;
       patch: number;
     }>();
-    expectTypeOf<EcuOptions>().toEqualTypeOf<{ readTimeoutMs?: number }>();
+    expectTypeOf<EcuOptions>().toEqualTypeOf<{
+      readTimeoutMs?: number;
+      commandResetMs?: number;
+    }>();
+    expectTypeOf<MemoryWriteFault>().toEqualTypeOf<
+      | 'commandLost'
+      | 'commandEchoCorrupted'
+      | 'valueEchoLost'
+      | 'valueEchoCorrupted'
+    >();
     expectTypeOf<WebSerialTransportOptions>().toEqualTypeOf<{
       baudRate?: number;
     }>();
