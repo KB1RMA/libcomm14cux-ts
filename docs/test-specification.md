@@ -155,7 +155,7 @@ Row scaler for maps 1–5 is at map offset + `0x10A`. The RPM table is sixteen 2
 | `0x004D` | - (4 spare), low pressure or air leak, fuel temp, - (2 spare) |
 | `0x004E` | - (6 spare), battery disconnected, RAM checksum |
 
-Each flag also has a factory fault code number (`FAULT_CODE_NUMBERS`), taken from the `.faultCodes` table in `faults.asm` of the 14CUX firmware disassembly. That table lists each byte's eight bits LSB first, in priority order, as BCD. Notably `0x004D` bit 4 is code 59, not 58. Tests pin every number as a literal and check the map has the same names as `getFaultCodes`.
+Each flag also has a factory fault code number (`FAULT_CODE_NUMBERS`), taken from the `.faultCodes` table in `faults.asm` of the 14CUX firmware disassembly. That table lists each byte's eight bits LSB first, in priority order, as BCD. Notably `0x004D` bit 4 is code 59, not 58. Tests pin every number as a literal and check that no two flags share a number; the `Record<FaultCodeName, number>` type keeps the map in step with `getFaultCodes`.
 
 **Deliberate divergence:** bit 3 of `0x0049` is fault code 25 (general misfire), reported as `misfireGeneral`. libcomm14cux treats it as spare. The [firmware disassembly](https://github.com/colinbourassa/14cux-firmware) sets it with `oraa #$08` in the misfire handler (`ignitionInt.asm`), and the priority table in `faults.asm` lists `0x49` as `29 44 45 25 40 50 12 21`, putting code 25 at bit 3. The same code is wrapped in `IF BUILD_R3360_AND_LATER` with the note that newer code does not use fault code 25, so only firmware before R3360 is expected to set it.
 
