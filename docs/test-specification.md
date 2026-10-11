@@ -194,6 +194,7 @@ Every public `Ecu` call is queued (the C library locks only inside `readMem`/`wr
 | Identifying an ECU, reading its calibration, dumping and cancelling the ROM, swapping ECUs | `romIdentification.acceptance.test.ts` |
 | Reading and clearing faults; fuel pump and idle air control | `workshop.acceptance.test.ts` |
 | Ignition off, cable pulled, noisy line, slow adapters, overlapping operations | `resilience.acceptance.test.ts` |
+| Published API surface: export names, `Ecu` methods, error hierarchy, wire constants and exported types, pinned as literals | `publicApi.acceptance.test.ts` |
 
 ### 7.1 Known issues
 
