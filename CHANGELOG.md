@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.1](https://github.com/KB1RMA/libcomm14cux-ts/compare/v0.2.0...v0.2.1) (2026-10-11)
+
+
+### Bug Fixes
+
+* keep the link in step after a failed command, and inject realistic write failures ([#17](https://github.com/KB1RMA/libcomm14cux-ts/issues/17)) ([c14be55](https://github.com/KB1RMA/libcomm14cux-ts/commit/c14be55bbf9051a957d1116b8be659dcbfda3377))
+* keep WebSerialTransport open until SerialPort.close() succeeds, so a failed close can be retried and the transport reopened ([8333c12](https://github.com/KB1RMA/libcomm14cux-ts/commit/8333c12a7f0409f34dfd3ed66e62be66a38ac660))
+
 ## [0.2.0](https://github.com/KB1RMA/libcomm14cux-ts/compare/v0.1.0...v0.2.0) (2026-10-11)
 
 
