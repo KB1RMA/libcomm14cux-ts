@@ -7,6 +7,7 @@ import {
   DEFAULT_READ_TIMEOUT_MS,
 } from '../constants.js';
 import { ProtocolError, ReadCancelledError, TimeoutError } from '../errors.js';
+import type { ProtocolTraceEvent } from '../trace.js';
 import type { Transport } from '../transport/types.js';
 import { nextRead } from './readCount.js';
 
@@ -17,6 +18,8 @@ const WRITE_LENGTH_CODE = 0;
 // The longest the ECU can keep talking after a failed command: a whole
 // 512-byte read reply, plus a few echoes.
 const MAX_LATE_BYTES = 0x200 + 4;
+
+type Writable<T> = { -readonly [K in keyof T]: T[K] };
 
 /**
  * Memory read and write commands over a `Transport`
@@ -29,6 +32,7 @@ const MAX_LATE_BYTES = 0x200 + 4;
 export class Protocol {
   readonly #transport: Transport;
   readonly #timeoutMs: number;
+  readonly #emit: ((event: ProtocolTraceEvent) => void) | undefined;
   readonly #commandResetMs: number;
   #resyncNeeded = false;
   #lastReadCoarseAddress = 0;
@@ -41,15 +45,18 @@ export class Protocol {
    * @param timeoutMs - Silence timeout for each read, in milliseconds.
    * @param commandResetMs - Quiet time to wait for after a failed command,
    * in milliseconds.
+   * @param emit - Receives trace events. When omitted, nothing is built or reported.
    */
   constructor(
     transport: Transport,
     timeoutMs = DEFAULT_READ_TIMEOUT_MS,
     commandResetMs = DEFAULT_COMMAND_RESET_MS,
+    emit?: (event: ProtocolTraceEvent) => void,
   ) {
     this.#transport = transport;
     this.#timeoutMs = timeoutMs;
     this.#commandResetMs = commandResetMs;
+    this.#emit = emit;
   }
 
   /** Forgets the last coarse address, forcing the next read to set it. */
@@ -86,18 +93,35 @@ export class Protocol {
 
     const result = new Uint8Array(length);
     const multiChunk = nextRead(length, 0).count < length;
+    const emit = multiChunk ? this.#emit : undefined;
+    const chunkCount = emit ? countChunks(length) : 0;
     let totalRead = 0;
+    let chunkIndex = 0;
 
     try {
       await this.#resync();
 
       while (totalRead < length) {
         if (multiChunk && isCancelled()) {
+          this.#emit?.({
+            type: 'read-cancelled',
+            address: addr,
+            length,
+            bytesRead: totalRead,
+          });
           throw new ReadCancelledError('Read cancelled');
         }
 
         const { count: quantity, code } = nextRead(length, totalRead);
         const chunkAddr = addr + totalRead;
+
+        emit?.({
+          type: 'read-chunk',
+          address: chunkAddr,
+          length: quantity,
+          chunkIndex: chunkIndex++,
+          chunkCount,
+        });
 
         // The ECU latches only the 64-byte-aligned block (addr >> 6), so the
         // final command byte alone is enough only within that same block.
@@ -112,11 +136,10 @@ export class Protocol {
         }
 
         // The ECU does not echo the read command; it starts sending data.
-        await this.#transport.write(Uint8Array.of(0xc0 | (chunkAddr & 0x3f)));
-        result.set(
-          await this.#transport.read(quantity, this.#timeoutMs),
-          totalRead,
-        );
+        const readCommand = 0xc0 | (chunkAddr & 0x3f);
+
+        await this.#transport.write(Uint8Array.of(readCommand));
+        result.set(await this.#receive(quantity, [readCommand]), totalRead);
         totalRead += quantity;
         this.#lastReadQuantity = quantity;
       }
@@ -146,13 +169,15 @@ export class Protocol {
       throw new RangeError(`Invalid value: ${value}`);
     }
 
+    const command = [0x80 | (addr & 0x3f), value];
+
     this.resetCache();
 
     try {
       await this.#resync();
       await this.setCoarseAddr(addr, WRITE_LENGTH_CODE);
-      await this.#sendEchoed(0x80 | (addr & 0x3f));
-      await this.#sendEchoed(value);
+      await this.#sendEchoed(command, 0);
+      await this.#sendEchoed(command, 1);
     } catch (error) {
       this.#resyncNeeded = true;
       throw error;
@@ -169,8 +194,10 @@ export class Protocol {
    * @throws {@link TimeoutError} if the ECU stops responding.
    */
   async setCoarseAddr(addr: number, code: number): Promise<void> {
-    await this.#sendEchoed(((code << 2) | (addr >> 14)) & 0xff);
-    await this.#sendEchoed((addr >> 6) & 0xff);
+    const command = [((code << 2) | (addr >> 14)) & 0xff, (addr >> 6) & 0xff];
+
+    await this.#sendEchoed(command, 0);
+    await this.#sendEchoed(command, 1);
   }
 
   /**
@@ -203,17 +230,77 @@ export class Protocol {
     throw new ProtocolError('ECU did not go quiet after a failed command');
   }
 
-  async #sendEchoed(byte: number): Promise<void> {
+  /**
+   * Sends one byte of a command and checks that the ECU echoes it.
+   *
+   * @param command - Every byte of the command, for diagnostics.
+   * @param position - Index in `command` of the byte to send.
+   */
+  async #sendEchoed(
+    command: readonly number[],
+    position: number,
+  ): Promise<void> {
+    const byte = command[position] ?? 0;
+
     await this.#transport.write(Uint8Array.of(byte));
 
-    const [echo] = await this.#transport.read(1, this.#timeoutMs);
+    const [echo] = await this.#receive(1, command);
 
     if (echo !== byte) {
+      const actual = echo ?? 0;
+
+      this.#emit?.({
+        type: 'echo-mismatch',
+        expected: byte,
+        received: actual,
+        position,
+        command,
+      });
       throw new ProtocolError(
-        `Echo mismatch: sent 0x${byte.toString(16)}, received 0x${(echo ?? 0).toString(16)}`,
+        `Echo mismatch: sent 0x${byte.toString(16)}, received 0x${actual.toString(16)}`,
+        { expected: byte, actual, position, command },
       );
     }
   }
+
+  /**
+   * Reads from the transport, and adds the command that was awaiting a reply
+   * to any timeout. The timeout is rethrown as the same object.
+   *
+   * @param length - Number of bytes wanted.
+   * @param command - The command bytes just sent.
+   * @returns Exactly `length` bytes.
+   */
+  async #receive(
+    length: number,
+    command: readonly number[],
+  ): Promise<Uint8Array> {
+    try {
+      return await this.#transport.read(length, this.#timeoutMs);
+    } catch (error) {
+      if (error instanceof TimeoutError) {
+        // Fill in what the transport left out on the error itself, so its
+        // class, stack and any fields of its own reach the caller unchanged.
+        const details = error as Writable<TimeoutError>;
+
+        details.timeoutMs ??= this.#timeoutMs;
+        details.requestedBytes ??= length;
+        details.command ??= command;
+      }
+
+      throw error;
+    }
+  }
+}
+
+function countChunks(length: number): number {
+  let count = 0;
+
+  for (let read = 0; read < length; read += nextRead(length, read).count) {
+    count++;
+  }
+
+  return count;
 }
 
 function assertUint16(value: number, name: string): void {
