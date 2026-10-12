@@ -37,6 +37,9 @@ export class WebSerialTransport implements Transport {
   #leftover: Uint8Array = new Uint8Array(0);
   readonly #trace: ((event: SerialChunkTrace) => void) | undefined;
   #lastChunkAt: number | undefined;
+  // Tracked separately from the stream locks so that a port whose close()
+  // failed, or which exposed no streams, is still known to be open.
+  #portOpen = false;
 
   /**
    * Wraps a serial port. The port is not opened until {@link WebSerialTransport.open}.
@@ -54,28 +57,39 @@ export class WebSerialTransport implements Transport {
   /**
    * Opens the port at the configured baud rate, 8N1 with no flow control.
    * Does nothing if already open.
+   *
+   * If an earlier {@link WebSerialTransport.close} released the streams but
+   * the port refused to close, the port is not opened again; the stream locks
+   * are taken back so the transport is usable.
    */
   async open(): Promise<void> {
-    if (this.#reader) {
-      return;
+    if (!this.#portOpen) {
+      await this.#port.open({
+        baudRate: this.#baudRate,
+        dataBits: 8,
+        stopBits: 1,
+        parity: 'none',
+        flowControl: 'none',
+      });
+      this.#portOpen = true;
     }
 
-    await this.#port.open({
-      baudRate: this.#baudRate,
-      dataBits: 8,
-      stopBits: 1,
-      parity: 'none',
-      flowControl: 'none',
-    });
-    this.#reader = this.#port.readable?.getReader();
-    this.#writer = this.#port.writable?.getWriter();
+    this.#reader ??= this.#port.readable?.getReader();
+    this.#writer ??= this.#port.writable?.getWriter();
   }
 
   /**
    * Cancels any pending read, releases the stream locks and closes the port.
    * Does nothing if not open.
+   *
+   * If the port refuses to close, the transport stays open as far as this
+   * method is concerned, so calling it again retries `SerialPort.close()`.
    */
   async close(): Promise<void> {
+    if (!this.#portOpen) {
+      return;
+    }
+
     const reader = this.#reader;
     const writer = this.#writer;
 
@@ -85,14 +99,14 @@ export class WebSerialTransport implements Transport {
     this.#leftover = new Uint8Array(0);
     this.#lastChunkAt = undefined;
 
-    if (!reader) {
-      return;
+    if (reader) {
+      await reader.cancel().catch(() => undefined);
+      reader.releaseLock();
     }
 
-    await reader.cancel().catch(() => undefined);
-    reader.releaseLock();
     writer?.releaseLock();
     await this.#port.close();
+    this.#portOpen = false;
   }
 
   /**
