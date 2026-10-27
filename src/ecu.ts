@@ -65,6 +65,12 @@ import {
 import { InvalidReadingError, NotConnectedError } from './errors.js';
 import { Protocol } from './protocol/protocol.js';
 import { CommandQueue } from './queue.js';
+import {
+  guardTrace,
+  type OperationEndTrace,
+  type TraceEvent,
+  type Unstamped,
+} from './trace.js';
 import type { Transport } from './transport/types.js';
 import { LIBRARY_VERSION, type Version } from './version.js';
 
@@ -77,6 +83,17 @@ export interface EcuOptions {
    * libcomm14cux.
    */
   readTimeoutMs?: number;
+  /**
+   * Receives diagnostic events: operations starting and ending, split-read
+   * chunks, echo mismatches, queue waits and cancellations. See
+   * {@link TraceEvent}.
+   *
+   * When omitted, no events are built and nothing is measured. An exception
+   * thrown by the handler is ignored, so it cannot affect an operation.
+   * Handlers run synchronously on the library's call stack, so keep them
+   * quick.
+   */
+  onTrace?: (event: TraceEvent) => void;
   /**
    * After a command fails part-way, the ECU may still be waiting for the rest
    * of it, and would take the next byte sent as that rest (for a write, as the
@@ -140,6 +157,9 @@ export class Ecu {
   #requested = 0;
   #running = 0;
   #cancelledThrough = 0;
+  readonly #trace: ((event: TraceEvent) => void) | undefined;
+  #operation = '';
+  #operationId = 0;
   #promRev: KnownDataOffsetRev | undefined = undefined;
   #voltageFactorA = 0;
   #voltageFactorB = 0;
@@ -153,11 +173,18 @@ export class Ecu {
    * @param options - Optional settings.
    */
   constructor(transport: Transport, options: EcuOptions = {}) {
+    const trace = options.onTrace ? guardTrace(options.onTrace) : undefined;
+
     this.#transport = transport;
+    this.#trace = trace;
     this.#protocol = new Protocol(
       transport,
       options.readTimeoutMs ?? DEFAULT_READ_TIMEOUT_MS,
       options.commandResetMs ?? DEFAULT_COMMAND_RESET_MS,
+      trace &&
+        ((event) => {
+          this.#emitInOperation(event);
+        }),
     );
   }
 
@@ -191,12 +218,17 @@ export class Ecu {
    * @throws Whatever the transport's `open()` rejects with, for example if the serial port is busy.
    */
   connect(): Promise<void> {
-    return this.#queue.run(async () => {
-      if (!this.#connected) {
-        await this.#transport.open();
-        this.#connected = true;
-      }
-    });
+    return this.#run(
+      'connect',
+      async () => {
+        if (!this.#connected) {
+          await this.#transport.open();
+          this.#connected = true;
+        }
+      },
+      undefined,
+      false,
+    );
   }
 
   /**
@@ -208,18 +240,23 @@ export class Ecu {
    * @throws Whatever the transport's `close()` rejects with.
    */
   disconnect(): Promise<void> {
-    return this.#queue.run(async () => {
-      if (this.#connected) {
-        await this.#transport.close();
-        this.#connected = false;
-        this.#protocol.resetCache();
-        // A different ECU may be connected next time.
-        this.#promRev = undefined;
-        this.#voltageFactorA = 0;
-        this.#voltageFactorB = 0;
-        this.#voltageFactorC = 0;
-      }
-    });
+    return this.#run(
+      'disconnect',
+      async () => {
+        if (this.#connected) {
+          await this.#transport.close();
+          this.#connected = false;
+          this.#protocol.resetCache();
+          // A different ECU may be connected next time.
+          this.#promRev = undefined;
+          this.#voltageFactorA = 0;
+          this.#voltageFactorB = 0;
+          this.#voltageFactorC = 0;
+        }
+      },
+      undefined,
+      false,
+    );
   }
 
   /**
@@ -235,6 +272,11 @@ export class Ecu {
    * queue.
    */
   cancelRead(): void {
+    this.#trace?.({
+      type: 'cancel-read',
+      timestamp: Date.now(),
+      outstanding: this.#queue.pending,
+    });
     this.#cancelledThrough = this.#requested;
   }
 
@@ -256,7 +298,10 @@ export class Ecu {
    * @throws {@link ReadCancelledError} if {@link Ecu.cancelRead} was called before the read finished.
    */
   readMem(addr: number, length: number): Promise<Uint8Array> {
-    return this.#run(() => this.#read(addr, length));
+    return this.#run('readMem', () => this.#read(addr, length), {
+      address: addr,
+      length,
+    });
   }
 
   /**
@@ -273,7 +318,7 @@ export class Ecu {
    * @throws {@link RangeError} if the address or value is out of range.
    */
   writeMem(addr: number, value: number): Promise<void> {
-    return this.#run(() => this.#protocol.writeMem(addr, value));
+    return this.#run('writeMem', () => this.#protocol.writeMem(addr, value));
   }
 
   /**
@@ -288,7 +333,11 @@ export class Ecu {
    * @throws {@link ReadCancelledError} if {@link Ecu.cancelRead} was called before the read finished.
    */
   dumpROM(): Promise<Uint8Array> {
-    return this.readMem(MemoryOffset.ROMAddress, DataSize.ROM);
+    return this.#run(
+      'dumpROM',
+      () => this.#read(MemoryOffset.ROMAddress, DataSize.ROM),
+      { address: MemoryOffset.ROMAddress, length: DataSize.ROM },
+    );
   }
 
   // ---- simple readings ----------------------------------------------------
@@ -302,7 +351,7 @@ export class Ecu {
    * @throws {@link ProtocolError} if the ECU echoes a command byte incorrectly.
    */
   getRoadSpeed(): Promise<number> {
-    return this.#run(async () =>
+    return this.#run('getRoadSpeed', async () =>
       decodeRoadSpeedMph(await this.#byte(MemoryOffset.RoadSpeed)),
     );
   }
@@ -316,7 +365,7 @@ export class Ecu {
    * @throws {@link ProtocolError} if the ECU echoes a command byte incorrectly.
    */
   getCoolantTemp(): Promise<number> {
-    return this.#run(async () =>
+    return this.#run('getCoolantTemp', async () =>
       decodeTemperatureF(await this.#byte(MemoryOffset.CoolantTemp)),
     );
   }
@@ -330,7 +379,7 @@ export class Ecu {
    * @throws {@link ProtocolError} if the ECU echoes a command byte incorrectly.
    */
   getFuelTemp(): Promise<number> {
-    return this.#run(async () =>
+    return this.#run('getFuelTemp', async () =>
       decodeTemperatureF(await this.#byte(MemoryOffset.FuelTemp)),
     );
   }
@@ -346,7 +395,7 @@ export class Ecu {
    * @throws {@link InvalidReadingError} if the ECU returns a value outside the range its firmware can produce.
    */
   getMAFReading(type: AirflowType): Promise<number> {
-    return this.#run(async () =>
+    return this.#run('getMAFReading', async () =>
       type === AirflowType.Direct
         ? decodeMafDirect(await this.#word(MemoryOffset.MassAirflowDirect))
         : decodeMafLinear(await this.#word(MemoryOffset.MassAirflowLinear)),
@@ -363,7 +412,7 @@ export class Ecu {
    * @throws {@link InvalidReadingError} if the ECU returns a value outside the range its firmware can produce. (a zero pulse width)
    */
   getEngineRPM(): Promise<number> {
-    return this.#run(async () =>
+    return this.#run('getEngineRPM', async () =>
       decodeEngineRpm(await this.#word(MemoryOffset.EngineSpeedFiltered)),
     );
   }
@@ -378,7 +427,7 @@ export class Ecu {
    * @throws {@link InvalidReadingError} if the ECU returns a value outside the range its firmware can produce. (a zero pulse width)
    */
   getRPMLimit(): Promise<number> {
-    return this.#run(async () =>
+    return this.#run('getRPMLimit', async () =>
       pulseWidthToRpm(await this.#word(MemoryOffset.RPMLimit)),
     );
   }
@@ -392,7 +441,9 @@ export class Ecu {
    * @throws {@link ProtocolError} if the ECU echoes a command byte incorrectly.
    */
   getTargetIdle(): Promise<number> {
-    return this.#run(() => this.#word(MemoryOffset.TargetIdleSpeed));
+    return this.#run('getTargetIdle', () =>
+      this.#word(MemoryOffset.TargetIdleSpeed),
+    );
   }
 
   /**
@@ -406,7 +457,7 @@ export class Ecu {
    * @throws {@link InvalidReadingError} if the ECU returns a value outside the range its firmware can produce.
    */
   getThrottlePosition(type: ThrottlePosType): Promise<number> {
-    return this.#run(async () => {
+    return this.#run('getThrottlePosition', async () => {
       const raw = await this.#word(MemoryOffset.ThrottlePosition);
 
       assertThrottleReading(raw);
@@ -429,7 +480,7 @@ export class Ecu {
    * @throws {@link ProtocolError} if the ECU echoes a command byte incorrectly.
    */
   getGearSelection(): Promise<Gear> {
-    return this.#run(async () =>
+    return this.#run('getGearSelection', async () =>
       decodeGear(await this.#byte(MemoryOffset.TransmissionGear)),
     );
   }
@@ -443,7 +494,7 @@ export class Ecu {
    * @throws {@link ProtocolError} if the ECU echoes a command byte incorrectly.
    */
   getIdleBypassMotorPosition(): Promise<number> {
-    return this.#run(async () =>
+    return this.#run('getIdleBypassMotorPosition', async () =>
       decodeIdleBypassPosition(
         await this.#byte(MemoryOffset.IdleBypassPosition),
       ),
@@ -463,7 +514,9 @@ export class Ecu {
    * @throws {@link ProtocolError} if the ECU echoes a command byte incorrectly.
    */
   getInjectorPulseWidth(): Promise<number> {
-    return this.#run(() => this.#word(MemoryOffset.InjectorPulseWidth));
+    return this.#run('getInjectorPulseWidth', () =>
+      this.#word(MemoryOffset.InjectorPulseWidth),
+    );
   }
 
   // ---- fuel trims ---------------------------------------------------------
@@ -478,7 +531,7 @@ export class Ecu {
    * @throws {@link ProtocolError} if the ECU echoes a command byte incorrectly.
    */
   getLambdaTrimShort(bank: Bank): Promise<number> {
-    return this.#run(async () =>
+    return this.#run('getLambdaTrimShort', async () =>
       decodeLambdaTrim(
         await this.#word(
           bank === Bank.Odd
@@ -499,7 +552,7 @@ export class Ecu {
    * @throws {@link ProtocolError} if the ECU echoes a command byte incorrectly.
    */
   getLambdaTrimLong(bank: Bank): Promise<number> {
-    return this.#run(async () =>
+    return this.#run('getLambdaTrimLong', async () =>
       decodeLambdaTrim(
         await this.#word(
           bank === Bank.Odd
@@ -519,7 +572,7 @@ export class Ecu {
    * @throws {@link ProtocolError} if the ECU echoes a command byte incorrectly.
    */
   getCOTrimVoltage(): Promise<number> {
-    return this.#run(async () =>
+    return this.#run('getCOTrimVoltage', async () =>
       decodeCoTrimVoltage(
         await this.#word(MemoryOffset.LongTermLambdaFuelingTrimEven),
       ),
@@ -541,7 +594,7 @@ export class Ecu {
    * @throws {@link InvalidReadingError} if the ECU returns a value outside the range its firmware can produce. (coefficients of zero, or a reading that does not fit them)
    */
   getMainVoltage(): Promise<number> {
-    return this.#run(async () => {
+    return this.#run('getMainVoltage', async () => {
       if (
         this.#voltageFactorA === 0 ||
         this.#voltageFactorB === 0 ||
@@ -582,7 +635,7 @@ export class Ecu {
       return Promise.reject(error as Error);
     }
 
-    return this.#run(async () => {
+    return this.#run('getFuelMap', async () => {
       const location = fuelMapLocation(
         fuelMapId,
         await this.#determineDataOffsets(),
@@ -611,7 +664,7 @@ export class Ecu {
    * @throws {@link InvalidReadingError} if the ECU returns a value outside the range its firmware can produce.
    */
   getCurrentFuelMap(): Promise<number> {
-    return this.#run(async () =>
+    return this.#run('getCurrentFuelMap', async () =>
       decodeCurrentFuelMap(await this.#byte(MemoryOffset.CurrentFuelMapId)),
     );
   }
@@ -626,7 +679,7 @@ export class Ecu {
    * @throws {@link InvalidReadingError} if the ECU returns a value outside the range its firmware can produce.
    */
   getFuelMapRowIndex(): Promise<FuelMapIndex> {
-    return this.#run(async () =>
+    return this.#run('getFuelMapRowIndex', async () =>
       decodeFuelMapRowIndex(await this.#byte(MemoryOffset.FuelMapRowIndex)),
     );
   }
@@ -641,7 +694,7 @@ export class Ecu {
    * @throws {@link InvalidReadingError} if the ECU returns a value outside the range its firmware can produce.
    */
   getFuelMapColumnIndex(): Promise<FuelMapIndex> {
-    return this.#run(async () =>
+    return this.#run('getFuelMapColumnIndex', async () =>
       decodeFuelMapColumnIndex(
         await this.#byte(MemoryOffset.FuelMapColumnIndex),
       ),
@@ -658,7 +711,7 @@ export class Ecu {
    * @throws {@link InvalidReadingError} if the ECU returns a value outside the range its firmware can produce. (a zero pulse width)
    */
   getRpmTable(): Promise<number[]> {
-    return this.#run(async () => {
+    return this.#run('getRpmTable', async () => {
       const table: number[] = new Array<number>(FUEL_MAP_COLUMNS).fill(0);
 
       for (let column = 0; column < FUEL_MAP_COLUMNS; column++) {
@@ -682,7 +735,7 @@ export class Ecu {
    * @throws {@link ProtocolError} if the ECU echoes a command byte incorrectly.
    */
   getFaultCodes(): Promise<FaultCodes> {
-    return this.#run(async () =>
+    return this.#run('getFaultCodes', async () =>
       decodeFaultCodes(
         await this.#read(MemoryOffset.FaultCodes, FAULT_CODE_BLOCK_SIZE),
       ),
@@ -700,7 +753,7 @@ export class Ecu {
    * @throws {@link ProtocolError} if the ECU echoes a command byte incorrectly.
    */
   clearFaultCodes(): Promise<void> {
-    return this.#run(async () => {
+    return this.#run('clearFaultCodes', async () => {
       for (let i = 0; i < FAULT_CODE_BLOCK_SIZE; i++) {
         await this.#protocol.writeMem(MemoryOffset.FaultCodes + i, 0x00);
       }
@@ -716,7 +769,7 @@ export class Ecu {
    * @throws {@link ProtocolError} if the ECU echoes a command byte incorrectly.
    */
   getFuelPumpRelayState(): Promise<boolean> {
-    return this.#run(async () =>
+    return this.#run('getFuelPumpRelayState', async () =>
       decodeFuelPumpRelay(await this.#byte(MemoryOffset.Port1)),
     );
   }
@@ -730,7 +783,7 @@ export class Ecu {
    * @throws {@link ProtocolError} if the ECU echoes a command byte incorrectly.
    */
   isMILOn(): Promise<boolean> {
-    return this.#run(async () =>
+    return this.#run('isMILOn', async () =>
       decodeMilOn(await this.#byte(MemoryOffset.Port1)),
     );
   }
@@ -744,7 +797,7 @@ export class Ecu {
    * @throws {@link ProtocolError} if the ECU echoes a command byte incorrectly.
    */
   getIdleMode(): Promise<boolean> {
-    return this.#run(async () =>
+    return this.#run('getIdleMode', async () =>
       decodeIdleMode(await this.#byte(MemoryOffset.IdleMode)),
     );
   }
@@ -758,7 +811,7 @@ export class Ecu {
    * @throws {@link ProtocolError} if the ECU echoes a command byte incorrectly.
    */
   getPurgeValveState(): Promise<PurgeValveState> {
-    return this.#run(async () =>
+    return this.#run('getPurgeValveState', async () =>
       decodePurgeValveState(await this.#word(MemoryOffset.PurgeValveState)),
     );
   }
@@ -772,7 +825,7 @@ export class Ecu {
    * @throws {@link ProtocolError} if the ECU echoes a command byte incorrectly.
    */
   getScreenHeaterState(): Promise<boolean> {
-    return this.#run(async () =>
+    return this.#run('getScreenHeaterState', async () =>
       decodeScreenHeater(await this.#byte(MemoryOffset.Bits00DD)),
     );
   }
@@ -786,7 +839,7 @@ export class Ecu {
    * @throws {@link ProtocolError} if the ECU echoes a command byte incorrectly.
    */
   getACCompressorState(): Promise<boolean> {
-    return this.#run(async () =>
+    return this.#run('getACCompressorState', async () =>
       decodeAcCompressor(await this.#byte(MemoryOffset.Bits008A)),
     );
   }
@@ -800,7 +853,7 @@ export class Ecu {
    * @throws {@link ProtocolError} if the ECU echoes a command byte incorrectly.
    */
   getTuneRevision(): Promise<TuneRevision> {
-    return this.#run(async () =>
+    return this.#run('getTuneRevision', async () =>
       decodeTuneRevision(await this.#read(MemoryOffset.TuneRevision, 5)),
     );
   }
@@ -818,7 +871,7 @@ export class Ecu {
    * @throws {@link ProtocolError} if the ECU echoes a command byte incorrectly.
    */
   runFuelPump(): Promise<void> {
-    return this.#run(async () => {
+    return this.#run('runFuelPump', async () => {
       const port1 = await this.#byte(MemoryOffset.Port1);
 
       await this.#protocol.writeMem(MemoryOffset.FuelPumpTimer, 0xff);
@@ -846,7 +899,7 @@ export class Ecu {
       return Promise.reject(new RangeError(`Invalid step count: ${steps}`));
     }
 
-    return this.#run(async () => {
+    return this.#run('driveIdleAirControlMotor', async () => {
       const bits = await this.#byte(MemoryOffset.Bits008A);
 
       await this.#protocol.writeMem(
@@ -862,18 +915,96 @@ export class Ecu {
 
   // ---- internals ----------------------------------------------------------
 
-  #run<T>(task: () => Promise<T>): Promise<T> {
+  #run<T>(
+    operation: string,
+    task: () => Promise<T>,
+    target?: { address: number; length: number },
+    needsConnection = true,
+  ): Promise<T> {
     const ticket = ++this.#requested;
 
-    return this.#queue.run(() => {
-      if (!this.#connected) {
-        return Promise.reject(new NotConnectedError('Not connected to ECU'));
+    if (!this.#trace) {
+      return this.#queue.run(() => {
+        this.#begin(ticket, needsConnection);
+
+        return task();
+      });
+    }
+
+    return this.#runTraced(ticket, operation, task, target, needsConnection);
+  }
+
+  #begin(ticket: number, needsConnection: boolean): void {
+    if (needsConnection && !this.#connected) {
+      throw new NotConnectedError('Not connected to ECU');
+    }
+
+    this.#running = ticket;
+  }
+
+  #runTraced<T>(
+    ticket: number,
+    operation: string,
+    task: () => Promise<T>,
+    target: { address: number; length: number } | undefined,
+    needsConnection: boolean,
+  ): Promise<T> {
+    const ahead = this.#queue.pending;
+    const submitted = performance.now();
+
+    return this.#queue.run(async () => {
+      const started = performance.now();
+
+      this.#operation = operation;
+      this.#operationId = ticket;
+
+      if (ahead > 0) {
+        this.#emitInOperation({
+          type: 'queue-wait',
+          waitMs: started - submitted,
+          ahead,
+        });
       }
 
-      this.#running = ticket;
+      this.#emitInOperation({ type: 'operation-start', ...target });
 
-      return task();
+      const end = (outcome: Pick<OperationEndTrace, 'ok' | 'error'>): void => {
+        this.#emitInOperation({
+          type: 'operation-end',
+          ...target,
+          durationMs: performance.now() - started,
+          ...outcome,
+        });
+      };
+
+      try {
+        this.#begin(ticket, needsConnection);
+
+        const result = await task();
+
+        end({ ok: true });
+
+        return result;
+      } catch (error) {
+        end({ ok: false, error });
+        throw error;
+      }
     });
+  }
+
+  /**
+   * Reports an event for the operation now running. Operations run one at a
+   * time, so that is the one whose bytes are on the wire.
+   *
+   * @param event - The event, without the fields that identify the operation.
+   */
+  #emitInOperation(event: Unstamped): void {
+    this.#trace?.({
+      ...event,
+      timestamp: Date.now(),
+      operationId: this.#operationId,
+      operation: this.#operation,
+    } as TraceEvent);
   }
 
   #read(addr: number, length: number): Promise<Uint8Array> {

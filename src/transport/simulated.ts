@@ -209,10 +209,18 @@ export class SimulatedTransport implements Transport {
     }
 
     if (this.#output.length < length) {
+      const received = this.#output.length;
+
       this.#output = [];
       this.#quietMs += timeoutMs;
 
-      return Promise.reject(new TimeoutError('Simulated ECU is silent'));
+      return Promise.reject(
+        new TimeoutError('Simulated ECU is silent', {
+          timeoutMs,
+          requestedBytes: length,
+          receivedBytes: received,
+        }),
+      );
     }
 
     return Promise.resolve(Uint8Array.from(this.#output.splice(0, length)));

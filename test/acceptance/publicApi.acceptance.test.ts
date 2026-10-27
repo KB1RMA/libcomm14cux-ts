@@ -16,6 +16,8 @@ import type {
   FuelMapIndex,
   Gear,
   MemoryWriteFault,
+  SerialChunkTrace,
+  TraceEvent,
   Transport,
   TuneRevision,
   Version,
@@ -218,6 +220,7 @@ describe('public API surface', () => {
     }>();
     expectTypeOf<EcuOptions>().toEqualTypeOf<{
       readTimeoutMs?: number;
+      onTrace?: (event: TraceEvent) => void;
       commandResetMs?: number;
     }>();
     expectTypeOf<MemoryWriteFault>().toEqualTypeOf<
@@ -228,6 +231,26 @@ describe('public API surface', () => {
     >();
     expectTypeOf<WebSerialTransportOptions>().toEqualTypeOf<{
       baudRate?: number;
+      onTrace?: (event: SerialChunkTrace) => void;
+    }>();
+    expectTypeOf<
+      Pick<
+        api.TimeoutError,
+        'timeoutMs' | 'requestedBytes' | 'receivedBytes' | 'command'
+      >
+    >().toEqualTypeOf<{
+      readonly timeoutMs: number | undefined;
+      readonly requestedBytes: number | undefined;
+      readonly receivedBytes: number | undefined;
+      readonly command: readonly number[] | undefined;
+    }>();
+    expectTypeOf<
+      Pick<api.ProtocolError, 'expected' | 'actual' | 'position' | 'command'>
+    >().toEqualTypeOf<{
+      readonly expected: number | undefined;
+      readonly actual: number | undefined;
+      readonly position: number | undefined;
+      readonly command: readonly number[] | undefined;
     }>();
   });
 
